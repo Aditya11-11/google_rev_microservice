@@ -6,6 +6,7 @@ from langchain_groq import ChatGroq
 from flask_cors import CORS
 from flask_cors import cross_origin
 import ast 
+import re
 
 app = Flask(__name__)
 
@@ -64,23 +65,54 @@ def chat():
 
     combined_prompt = "\n".join(filter(None, [system_prompt.get("manual")]))
 
+    # # Combine human review and structured form data
+    # full_user_input = f"""
+    # Customer Review: {data['human_message']}
+    
+    # Structured Feedback (Form Data):
+    # {json.dumps(data['form_data'], indent=2)}
+    # """
+        # Build full input message
+    full_user_input = f"Customer Review: {data['human_message']}\n"
+
+    if "form_data" in data and isinstance(data["form_data"], dict):
+        full_user_input += "\nStructured Feedback (Form Data):\n"
+        full_user_input += json.dumps(data["form_data"], indent=2)
+
+
     messages = []
     if combined_prompt:
         messages.append(("system", combined_prompt))
 
-    messages.append(("human", data["human_message"]))
+    # messages.append(("human", data["human_message"]))
+    messages.append(("human", full_user_input))
+
 
     try:
         ai_response = llm.invoke(messages)
-        try:
-            AI_MSG = json.loads(ai_response.content)
-        except json.JSONDecodeError:
-            try:
-                AI_MSG = ast.literal_eval(ai_response.content)
-            except Exception:
-                AI_MSG = {"raw": ai_response.content}
+
+        # Try to extract JSON object from strin
+        content = ai_response.content
+
+        # Extract JSON block using regex (matches everything inside outermost `{}`)
+        match = re.search(r'\{.*\}', content, re.DOTALL)
+        if match:
+            AI_MSG = json.loads(match.group())
+        else:
+            AI_MSG = {"error": "Could not extract valid JSON from model response."}
     except Exception as e:
-        return jsonify({"error": f"LLM invocation error: {e}"}), 500
+        return jsonify({"error": f"Failed to parse LLM response: {e}"}), 500
+
+
+        # try:
+        #     AI_MSG = json.loads(ai_response.content)
+        # except json.JSONDecodeError:
+            # try:
+            #     AI_MSG = ast.literal_eval(ai_response.content)
+            # except Exception:
+            #     AI_MSG = {"raw": ai_response.content}
+    # except Exception as e:
+    #     return jsonify({"error": f"LLM invocation error: {e}"}), 500
 
     return jsonify({"response": AI_MSG}), 200
 
